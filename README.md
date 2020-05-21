@@ -54,7 +54,7 @@ str1: "x${var.one}y"
 int1: !!exp 1 + 2
 `
 
-file, diags := hclv2yaml.Parse(yamlSource, fileName)
+file, diags := hcl2yaml.Parse(yamlSource, fileName)
 if diags.HasErrors() {
 	diagWriter.WriteDiagnostics(diags)
 	os.Exit(1)
