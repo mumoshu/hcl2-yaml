@@ -9,7 +9,7 @@ import (
 	"github.com/hashicorp/hcl/v2/ext/typeexpr"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/terraform/lang/funcs"
-	"github.com/mumoshu/hclv2yaml"
+	"github.com/mumoshu/hcl2-yaml"
 	ctyyaml "github.com/zclconf/go-cty-yaml"
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
@@ -77,7 +77,7 @@ intval: 1
 
 	var result Result
 
-	file, diags := hclv2yaml.Parse(yamlSource2, fileName)
+	file, diags := hcl2yaml.Parse(yamlSource2, fileName)
 
 	failOnError(diags)
 
@@ -161,7 +161,7 @@ int1: !!exp 1 + 2
 
 	var dynamic Dynamic
 
-	file, diags := hclv2yaml.Parse(yamlSource2, fileName)
+	file, diags := hcl2yaml.Parse(yamlSource2, fileName)
 
 	failOnError(diags)
 

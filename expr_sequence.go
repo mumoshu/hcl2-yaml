@@ -1,4 +1,4 @@
-package hclv2yaml
+package hcl2yaml
 
 import (
 	"fmt"

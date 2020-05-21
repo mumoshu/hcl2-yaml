@@ -1,4 +1,4 @@
-module github.com/mumoshu/hclv2yaml
+module github.com/mumoshu/hcl2-yaml
 
 go 1.13
 

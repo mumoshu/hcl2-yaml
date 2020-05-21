@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
-	"github.com/mumoshu/hclv2yaml"
+	"github.com/mumoshu/hcl2-yaml"
 	"github.com/zclconf/go-cty/cty"
 	"golang.org/x/crypto/ssh/terminal"
 	"os"
@@ -12,8 +12,8 @@ import (
 )
 
 func main() {
-	schema := hclv2yaml.MapSchema{
-		Attributes: map[string]hclv2yaml.Attribute{
+	schema := hcl2yaml.MapSchema{
+		Attributes: map[string]hcl2yaml.Attribute{
 			"hello": {
 				Kind:     reflect.String,
 				Optional: false,
@@ -23,12 +23,12 @@ func main() {
 				Optional: true,
 			},
 		},
-		Blocks: map[string]hclv2yaml.Block{
+		Blocks: map[string]hcl2yaml.Block{
 			"foo": {
 				Plural:     "foos",
 				LabelNames: []string{"fooFirstLabel"},
 				Blocks:     nil,
-				Attributes: map[string]hclv2yaml.Attribute{
+				Attributes: map[string]hcl2yaml.Attribute{
 					"baz": {
 						Kind:     reflect.String,
 						Optional: false,
@@ -38,7 +38,7 @@ func main() {
 			"hoge": {
 				LabelNames: []string{},
 				Blocks:     nil,
-				Attributes: map[string]hclv2yaml.Attribute{
+				Attributes: map[string]hcl2yaml.Attribute{
 					"fuga": {
 						Kind:     reflect.String,
 						Optional: false,
@@ -99,7 +99,7 @@ intval: 1
 	for _, src := range yamlSources {
 		result := map[string]interface{}{}
 
-		file, diags := hclv2yaml.Parse(src, fileName)
+		file, diags := hcl2yaml.Parse(src, fileName)
 		if diags != nil {
 			diagWriter := hcl.NewDiagnosticTextWriter(os.Stderr, map[string]*hcl.File{}, uint(width), true)
 			diagWriter.WriteDiagnostics(diags)
@@ -112,7 +112,7 @@ intval: 1
 
 		diagWriter := hcl.NewDiagnosticTextWriter(os.Stderr, files, uint(width), true)
 
-		if diags := hclv2yaml.DecodeBodyIntoMap(ctx, file.Body, schema, &result); diags.HasErrors() {
+		if diags := hcl2yaml.DecodeBodyIntoMap(ctx, file.Body, schema, &result); diags.HasErrors() {
 			diagWriter.WriteDiagnostics(diags)
 			os.Exit(1)
 		}
@@ -132,7 +132,7 @@ intval: 1
 
 		var result Result
 
-		file, diags := hclv2yaml.Parse(yamlSource2, fileName)
+		file, diags := hcl2yaml.Parse(yamlSource2, fileName)
 		if diags.HasErrors() {
 			diagWriter := hcl.NewDiagnosticTextWriter(os.Stderr, map[string]*hcl.File{}, uint(width), true)
 			diagWriter.WriteDiagnostics(diags)
@@ -145,7 +145,7 @@ intval: 1
 
 		diagWriter := hcl.NewDiagnosticTextWriter(os.Stderr, files, uint(width), true)
 
-		if diags := hclv2yaml.DecodeBodyIntoMap(ctx, file.Body, schema, &result); diags.HasErrors() {
+		if diags := hcl2yaml.DecodeBodyIntoMap(ctx, file.Body, schema, &result); diags.HasErrors() {
 			diagWriter.WriteDiagnostics(diags)
 			os.Exit(1)
 		}
@@ -165,7 +165,7 @@ intval: 1
 
 		var result Result
 
-		file, diags := hclv2yaml.Parse(yamlSource2, fileName)
+		file, diags := hcl2yaml.Parse(yamlSource2, fileName)
 		if diags.HasErrors() {
 			diagWriter := hcl.NewDiagnosticTextWriter(os.Stderr, map[string]*hcl.File{}, uint(width), true)
 			diagWriter.WriteDiagnostics(diags)

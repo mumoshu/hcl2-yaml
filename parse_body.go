@@ -1,4 +1,4 @@
-package hclv2yaml
+package hcl2yaml
 
 import (
 	"fmt"
@@ -201,7 +201,7 @@ func (f *yamlBody) parseMapping(node *yaml.Node) (*hcl.BodyContent, hcl.Diagnost
 			return nil, hcl.Diagnostics{
 				&hcl.Diagnostic{
 					Severity:    hcl.DiagError,
-					Summary:     fmt.Sprintf("unsupported type of yaml node: %s", c.Kind),
+					Summary:     fmt.Sprintf("unsupported type of yaml node: %v", c.Kind),
 					Detail:      "",
 					Subject:     nil,
 					Context:     nil,
@@ -305,7 +305,7 @@ func (f *yamlBody) parseAttrsFromYaml(name string, valNode *yaml.Node) (*hcl.Att
 	return nil, hcl.Diagnostics{
 		&hcl.Diagnostic{
 			Severity:    hcl.DiagError,
-			Summary:     fmt.Sprintf("unable to parse attribute of unsupported kind/tag %q: %s %s", name, valNode.Kind, valNode.Tag),
+			Summary:     fmt.Sprintf("unable to parse attribute of unsupported kind/tag %q: %v %s", name, valNode.Kind, valNode.Tag),
 			Detail:      "",
 			Subject:     nil,
 			Context:     nil,
