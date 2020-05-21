@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/mitchellh/mapstructure"
 	"github.com/zclconf/go-cty/cty"
-	"github.com/zclconf/go-cty/cty/function"
 	"golang.org/x/crypto/ssh/terminal"
 	"gopkg.in/yaml.v3"
 	"os"
@@ -131,73 +131,62 @@ func main() {
 	fileName := "example.yaml"
 
 	yamlSource1 := []byte(`
-foo:
+foos:
   fooFirstLabel: bar
   baz: BAZ
-
-
-hoge:
-  fuga: FUGA
-
-hello: "world"
-
-intval: 1
+  label1: LABEL
 `)
 	yamlSource2 := []byte(`
 foos:
 - fooFirstLabel: bar
   baz: BAZ
-
-hoge:
-  fuga: FUGA
-
-hello: "world"
-
-intval: 1
+  label1: LABEL
 `)
-	//file, diags := hclsyntax.ParseConfig(source, fileName, hcl.InitialPos)
+
+	//file, diags := hclsyntax.ParseYAML(source, fileName, hcl.InitialPos)
 	yamlSources := [][]byte{yamlSource1, yamlSource2}
+
+	vs := map[string]cty.Value{
+		"one": cty.StringVal("ONE"),
+	}
+
+	vars := map[string]cty.Value{
+		"var": cty.MapVal(vs),
+	}
+
+	ctx := &hcl.EvalContext{
+		Variables: vars,
+		Functions: nil,
+	}
 
 	for _, src := range yamlSources {
 		result := map[string]interface{}{}
 
-		file := ParseConfig(src, fileName, schema)
+		file := ParseYAML(src, fileName)
 
 		files := map[string]*hcl.File{
 			fileName: file,
 		}
 
-		diagWriter := hcl.NewDiagnosticTextWriter(os.Stderr, files, uint(width), true)
-
-		if diags := DecodeObject(file, schema, &result); diags.HasErrors() {
-			diagWriter.WriteDiagnostics(diags)
-			os.Exit(1)
+		header := &hcl.BlockHeaderSchema{
+			Type:       "foos",
+			LabelNames: []string{"label1"},
 		}
 
-		fmt.Fprintf(os.Stdout, "%v\n", result)
-	}
+		var node yaml.Node
 
-	{
-		type Result struct {
-			Hello string
-			Intval int
-			Foos []struct{
-				FooFirstLabel string
-				Baz string
-			}
+		if err := yaml.Unmarshal(src, &node); err != nil {
+			panic(err)
 		}
 
-		var result Result
-
-		file := ParseConfig(yamlSource2, fileName, schema)
-
-		files := map[string]*hcl.File{
-			fileName: file,
+		bl, err := parseBlock(header, &node)
+		if err != nil {
+			panic(err)
 		}
 
 		diagWriter := hcl.NewDiagnosticTextWriter(os.Stderr, files, uint(width), true)
 
-		if diags := DecodeObject(file, schema, &result); diags.HasErrors() {
+		if diags := DecodeObject(ctx, file, schema, &result); diags.HasErrors() {
 			diagWriter.WriteDiagnostics(diags)
 			os.Exit(1)
 		}
@@ -206,12 +195,10 @@ intval: 1
 	}
 }
 
-func ParseConfig(src []byte, fileName string, deprecatedSchema MapSchema) *hcl.File {
+func ParseYAML(src []byte, fileName string) *hcl.File {
 	yamlBody := &YamlBody{
-		fileName:    fileName,
-		bytes:       src,
-		blockSchema: deprecatedSchema.Blocks,
-		attrSchemas: deprecatedSchema.Attributes,
+		fileName: fileName,
+		bytes:    src,
 	}
 
 	file := &hcl.File{
@@ -223,7 +210,7 @@ func ParseConfig(src []byte, fileName string, deprecatedSchema MapSchema) *hcl.F
 	return file
 }
 
-func DecodeObject(file *hcl.File, schema MapSchema, result interface{}) hcl.Diagnostics {
+func DecodeObject(ctx *hcl.EvalContext, file *hcl.File, schema MapSchema, result interface{}) hcl.Diagnostics {
 	bodySchema := schema.BodySchema()
 
 	bodyContent, diags := file.Body.Content(bodySchema)
@@ -234,11 +221,11 @@ func DecodeObject(file *hcl.File, schema MapSchema, result interface{}) hcl.Diag
 
 	switch dest := result.(type) {
 	case map[string]interface{}:
-		return parseMap(bodyContent, schema, dest)
+		return parseMap(ctx, bodyContent, schema, dest)
 	default:
 		m := map[string]interface{}{}
 
-		if diags := parseMap(bodyContent, schema, m); diags.HasErrors() {
+		if diags := parseMap(ctx, bodyContent, schema, m); diags.HasErrors() {
 			return diags
 		}
 
@@ -260,12 +247,12 @@ func DecodeObject(file *hcl.File, schema MapSchema, result interface{}) hcl.Diag
 	return nil
 }
 
-func parseMap(bodyContent *hcl.BodyContent, schema MapSchema, dest map[string]interface{}) hcl.Diagnostics {
-	if diags := parseBlocksIntoMap(bodyContent, schema.Blocks, dest); diags.HasErrors() {
+func parseMap(ctx *hcl.EvalContext, bodyContent *hcl.BodyContent, schema MapSchema, dest map[string]interface{}) hcl.Diagnostics {
+	if diags := parseBlocksIntoMap(ctx, bodyContent, schema.Blocks, dest); diags.HasErrors() {
 		return diags
 	}
 
-	if diags := parseAttributesIntoMap(bodyContent, schema.Attributes, dest); diags.HasErrors() {
+	if diags := parseAttributesIntoMap(ctx, bodyContent, schema.Attributes, dest); diags.HasErrors() {
 		return diags
 	}
 
@@ -276,13 +263,39 @@ type YamlBody struct {
 	fileName string
 
 	bytes []byte
+}
 
-	blockSchema map[string]Block
-
-	attrSchemas map[string]Attribute
+type yamlBody struct {
+	fileName     string
+	bytes        []byte
+	attrSchemas  map[string]hcl.AttributeSchema
+	blockSchemas map[string]hcl.BlockHeaderSchema
 }
 
 func (f *YamlBody) Content(schema *hcl.BodySchema) (*hcl.BodyContent, hcl.Diagnostics) {
+	attrSchemas := map[string]hcl.AttributeSchema{}
+
+	for _, a := range schema.Attributes {
+		attrSchemas[a.Name] = a
+	}
+
+	blockSchemas := map[string]hcl.BlockHeaderSchema{}
+
+	for _, b := range schema.Blocks {
+		blockSchemas[b.Type] = b
+	}
+
+	ff := &yamlBody{
+		bytes:        f.bytes,
+		fileName:     f.fileName,
+		attrSchemas:  attrSchemas,
+		blockSchemas: blockSchemas,
+	}
+
+	return ff.Content()
+}
+
+func (f *yamlBody) Content() (*hcl.BodyContent, hcl.Diagnostics) {
 	var value yaml.Node
 
 	yamlDecoder := yaml.NewDecoder(bytes.NewReader(f.bytes))
@@ -356,7 +369,7 @@ func (f *YamlBody) MissingItemRange() hcl.Range {
 
 var _ hcl.Body = &YamlBody{}
 
-func (f *YamlBody) parseMapping(node *yaml.Node) (*hcl.BodyContent, hcl.Diagnostics) {
+func (f *yamlBody) parseMapping(node *yaml.Node) (*hcl.BodyContent, hcl.Diagnostics) {
 	var bodyContent hcl.BodyContent
 
 	keyToValue := map[string]*yaml.Node{}
@@ -419,7 +432,7 @@ func (f *YamlBody) parseMapping(node *yaml.Node) (*hcl.BodyContent, hcl.Diagnost
 			}
 		}
 
-		attr, diags := f.parseAttrsFromYaml(k, attrSchema, c)
+		attr, diags := f.parseAttrsFromYaml(k, c)
 		if diags.HasErrors() {
 			return nil, diags
 		}
@@ -429,10 +442,11 @@ func (f *YamlBody) parseMapping(node *yaml.Node) (*hcl.BodyContent, hcl.Diagnost
 
 	var blocks []*hcl.Block
 
-	for k, blockSchema := range f.blockSchema {
+	for k, blockSchema := range f.blockSchemas {
 		c, exists := keyToValue[k]
 		if !exists {
-			c, exists = keyToValue[blockSchema.Plural]
+			// TODO Pluralization support
+			c, exists = keyToValue[k]
 			if !exists {
 				return nil, hcl.Diagnostics{
 					&hcl.Diagnostic{
@@ -479,9 +493,9 @@ func (f *YamlBody) parseMapping(node *yaml.Node) (*hcl.BodyContent, hcl.Diagnost
 	return &bodyContent, nil
 }
 
-func (f *YamlBody) parseAttrsFromYaml(name string, attrSchema Attribute, valNode *yaml.Node) (*hcl.Attribute, hcl.Diagnostics) {
-	switch attrSchema.Kind {
-	case reflect.Slice:
+func (f *yamlBody) parseAttrsFromYaml(name string, valNode *yaml.Node) (*hcl.Attribute, hcl.Diagnostics) {
+	switch valNode.Kind {
+	case yaml.SequenceNode:
 		var vs []cty.Value
 
 		for _, v := range valNode.Content {
@@ -513,82 +527,102 @@ func (f *YamlBody) parseAttrsFromYaml(name string, attrSchema Attribute, valNode
 		}
 
 		return attr, nil
-	case reflect.String:
-		v := valNode.Value
+	case yaml.ScalarNode:
+		switch valNode.Tag {
+		case "!!str":
+			v := valNode.Value
 
-		rng := hcl.Range{
-			Filename: f.fileName,
-			Start: hcl.Pos{
-				Column: valNode.Column,
-				Line:   valNode.Line,
-			},
-			End: hcl.Pos{
-				Column: valNode.Column + len(v),
-				Line:   valNode.Line,
-			},
-		}
-		attr := &hcl.Attribute{
-			Name:      name,
-			Expr:      hcl.StaticExpr(cty.StringVal(v), rng),
-			Range:     rng,
-			NameRange: hcl.Range{},
-		}
-
-		return attr, nil
-	case reflect.Int:
-		v := valNode.Value
-
-		rng := hcl.Range{
-			Filename: f.fileName,
-			Start: hcl.Pos{
-				Column: valNode.Column,
-				Line:   valNode.Line,
-			},
-			End: hcl.Pos{
-				Column: valNode.Column + len(v),
-				Line:   valNode.Line,
-			},
-		}
-
-		intval, err := strconv.Atoi(v)
-		if err != nil {
-			return nil, hcl.Diagnostics{
-				&hcl.Diagnostic{
-					Severity:    hcl.DiagError,
-					Summary:     err.Error(),
-					Detail:      "",
-					Subject:     &rng,
-					Context:     nil,
-					Expression:  nil,
-					EvalContext: nil,
+			rng := hcl.Range{
+				Filename: f.fileName,
+				Start: hcl.Pos{
+					Column: valNode.Column,
+					Line:   valNode.Line,
+				},
+				End: hcl.Pos{
+					Column: valNode.Column + len(v),
+					Line:   valNode.Line,
 				},
 			}
-		}
 
-		attr := &hcl.Attribute{
-			Name:      name,
-			Expr:      hcl.StaticExpr(cty.NumberIntVal(int64(intval)), rng),
-			Range:     rng,
-			NameRange: hcl.Range{},
-		}
+			var attr *hcl.Attribute
 
-		return attr, nil
-	default:
-		return nil, hcl.Diagnostics{
-			&hcl.Diagnostic{
-				Severity:    hcl.DiagError,
-				Summary:     fmt.Sprintf("unsupported type of attribute value: %s", attrSchema.Kind.String()),
-				Detail:      "",
-				Subject:     nil,
-				Context:     nil,
-				Expression:  nil,
-				EvalContext: nil,
-			},
+			//if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
+			expr, diags := hclsyntax.ParseTemplate([]byte(v), "", hcl.Pos{})
+			if diags.HasErrors() {
+				return nil, diags
+			}
+
+			attr = &hcl.Attribute{
+				Name:      name,
+				Expr:      expr,
+				Range:     rng,
+				NameRange: hcl.Range{},
+			}
+			//}
+			//else {
+			//	attr = &hcl.Attribute{
+			//		Name:      name,
+			//		Expr:      hcl.StaticExpr(cty.StringVal(v), rng),
+			//		Range:     rng,
+			//		NameRange: hcl.Range{},
+			//	}
+			//}
+
+			return attr, nil
+		case "!!int":
+			v := valNode.Value
+
+			rng := hcl.Range{
+				Filename: f.fileName,
+				Start: hcl.Pos{
+					Column: valNode.Column,
+					Line:   valNode.Line,
+				},
+				End: hcl.Pos{
+					Column: valNode.Column + len(v),
+					Line:   valNode.Line,
+				},
+			}
+
+			intval, err := strconv.Atoi(v)
+			if err != nil {
+				return nil, hcl.Diagnostics{
+					&hcl.Diagnostic{
+						Severity:    hcl.DiagError,
+						Summary:     err.Error(),
+						Detail:      "",
+						Subject:     &rng,
+						Context:     nil,
+						Expression:  nil,
+						EvalContext: nil,
+					},
+				}
+			}
+
+			attr := &hcl.Attribute{
+				Name:      name,
+				Expr:      hcl.StaticExpr(cty.NumberIntVal(int64(intval)), rng),
+				Range:     rng,
+				NameRange: hcl.Range{},
+			}
+
+			return attr, nil
 		}
+	}
+	return nil, hcl.Diagnostics{
+		&hcl.Diagnostic{
+			Severity:    hcl.DiagError,
+			Summary:     fmt.Sprintf("unsupported type of attribute %q: %s %s", name, valNode.Kind, valNode.Tag),
+			Detail:      "",
+			Subject:     nil,
+			Context:     nil,
+			Expression:  nil,
+			EvalContext: nil,
+		},
 	}
 }
 
-func (f *YamlBody) parseBlocksFromYamlSequence(tpe string, blockSchema Block, valNode *yaml.Node) ([]*hcl.Block, hcl.Diagnostics) {
+func (f *yamlBody) parseBlocksFromYamlSequence(tpe string, blockSchema Block, valNode *yaml.Node) ([]*hcl.Block, hcl.Diagnostics) {
 	if valNode.Kind != yaml.SequenceNode {
 		return nil, hcl.Diagnostics{
 			&hcl.Diagnostic{
@@ -634,7 +668,7 @@ func (f *YamlBody) parseBlocksFromYamlSequence(tpe string, blockSchema Block, va
 	return bls, nil
 }
 
-func (f *YamlBody) parseBlockFromYamlMapping(tpe string, blockSchema Block, valNode *yaml.Node) (*hcl.Block, hcl.Diagnostics) {
+func (f *yamlBody) parseBlockFromYamlMapping(tpe string, blockSchema Block, valNode *yaml.Node) (*hcl.Block, hcl.Diagnostics) {
 	c := valNode.Content
 
 	var block hcl.Block
@@ -715,8 +749,6 @@ func (f *YamlBody) parseBlockFromYamlMapping(tpe string, blockSchema Block, valN
 	ff := &YamlBody{
 		fileName:    f.fileName,
 		bytes:       yamlSource,
-		blockSchema: blockSchema.Blocks,
-		attrSchemas: blockSchema.Attributes,
 	}
 
 	block.Body = ff
@@ -724,7 +756,7 @@ func (f *YamlBody) parseBlockFromYamlMapping(tpe string, blockSchema Block, valN
 	return &block, nil
 }
 
-func parseBlocksIntoMap(bodyContent *hcl.BodyContent, blockToMapSchema map[string]Block, dest map[string]interface{}) hcl.Diagnostics {
+func parseBlocksIntoMap(ctx *hcl.EvalContext, bodyContent *hcl.BodyContent, blockToMapSchema map[string]Block, dest map[string]interface{}) hcl.Diagnostics {
 	blocksByType := bodyContent.Blocks.ByType()
 
 	for tpe, blockSchema := range blockToMapSchema {
@@ -751,7 +783,7 @@ func parseBlocksIntoMap(bodyContent *hcl.BodyContent, blockToMapSchema map[strin
 
 			m := map[string]interface{}{}
 
-			if diags := parseAttributesIntoMap(blockBodyContent, blockSchema.Attributes, m); diags.HasErrors() {
+			if diags := parseAttributesIntoMap(ctx, blockBodyContent, blockSchema.Attributes, m); diags.HasErrors() {
 				return diags
 			}
 
@@ -759,7 +791,7 @@ func parseBlocksIntoMap(bodyContent *hcl.BodyContent, blockToMapSchema map[strin
 				m[name] = b.Labels[i]
 			}
 
-			if diags := parseBlocksIntoMap(blockBodyContent, blockSchema.Blocks, m); diags.HasErrors() {
+			if diags := parseBlocksIntoMap(ctx, blockBodyContent, blockSchema.Blocks, m); diags.HasErrors() {
 				return diags
 			}
 
@@ -790,7 +822,7 @@ func parseBlocksIntoMap(bodyContent *hcl.BodyContent, blockToMapSchema map[strin
 	return hcl.Diagnostics{}
 }
 
-func parseAttributesIntoMap(bodyContent *hcl.BodyContent, attrSchemas map[string]Attribute, dest map[string]interface{}) hcl.Diagnostics {
+func parseAttributesIntoMap(ctx *hcl.EvalContext, bodyContent *hcl.BodyContent, attrSchemas map[string]Attribute, dest map[string]interface{}) hcl.Diagnostics {
 	remainingAttrs := map[string]*hcl.Attribute{}
 
 	for _, a := range bodyContent.Attributes {
@@ -809,11 +841,6 @@ func parseAttributesIntoMap(bodyContent *hcl.BodyContent, attrSchemas map[string
 		}
 
 		delete(remainingAttrs, k)
-
-		ctx := &hcl.EvalContext{
-			Variables: map[string]cty.Value{},
-			Functions: map[string]function.Function{},
-		}
 
 		switch attrSchema.Kind {
 		case reflect.String:
