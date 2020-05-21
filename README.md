@@ -42,6 +42,7 @@ ary1:
 # See also:
 # list: https://www.terraform.io/docs/configuration/functions/list.html
 # map: https://www.terraform.io/docs/configuration/functions/map.html
+# HCL2 Expression: https://github.com/hashicorp/hcl2/blob/master/hcl/hclsyntax/spec.md#expressions
 ary2: !!exp list(map("a", "x${var.one}y"))
 
 map1:
